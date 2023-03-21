@@ -1,0 +1,399 @@
+---
+title: "Flight Landing data - Linear Regression Analysis"
+author: "Monika Reddy Gunnam"
+output: 
+  html_document:
+    theme: cerulean
+    toc: true
+    toc_float: true
+    toc_collapsed: true
+    toc_width: 3
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+FAA flight landing dataset is used for this study to identify which factors are impacting on the landing distance of flights.
+
+#### Data definitions:
+* **aircraft** : The make of an aircraft (Boeing or Airbus)
+* **duration(in minutes)**: Flight duration between taking off and landing. The duration of a normal flight should always be greater than 40min.
+* **no_pasg**: The number of passengers in a flight.
+* **speed_ground(in miles per hour)**: The ground speed of an aircraft when passing over the threshold of the runway. If its value is less than 30MPH or greater than 140MPH, then the landing would be considered as abnormal. 
+* **speed_air(in miles per hour)**: The air speed of an aircraft when passing over the threshold of the runway. If its value is less than 30MPH or greater than 140MPH, then the landing would be considered as abnormal. 
+* **Height (in meters)**: The height of an aircraft when it is passing over the threshold of the runway. The landing aircraft is required to be at least 6 meters high at the threshold of the runway. 
+* **Pitch(in degrees)**: Pitch angle of an aircraft when it is passing over the threshold of the runway. 
+* **Distance (in feet)**: The landing distance of an aircraft. More specifically, it refers to the distance between the threshold of the runway and the touchdown point. The length of the airport runway is typically less than 6000 feet. 
+
+
+# Required packages
+
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+library(tidyverse)
+library(ggplot2)
+library(readxl)
+library(knitr) 
+library(MASS)
+```
+
+# Initial exploration
+```{r, include=FALSE}
+FAA1 <- read_xls('/Users/monikareddy/Downloads/FAA1.xls')
+FAA2 <- read_xls('/Users/monikareddy/Downloads/FAA2.xls')
+FAA <- bind_rows(x = FAA1, y = FAA2)
+
+combined_rows <- nrow(FAA)
+
+FAA <- distinct(FAA, 
+                aircraft, no_pasg, speed_ground, speed_air, height, pitch, distance, 
+                .keep_all = TRUE)
+
+FAA$aircraft <- as.factor(FAA$aircraft)
+final_rows <- nrow(FAA)
+```
+
+```{r}
+str(FAA)
+```
+```{r}
+summary(FAA)
+```
+```{r figures-side, fig.show="hold"}
+par(mfrow = c(2,2))
+
+barplot(table(FAA$aircraft), main = "Aircraft distribution", xlab = "Aircraft", col = "#519cb3")
+
+hist(FAA$duration, main = "Histogram of duration", freq = FALSE, xlab = "duration")
+
+hist(FAA$no_pasg, main = "Histogram of no_pasg", freq = FALSE, xlab = "no_pasg")
+lines(density(FAA$no_pasg), lwd = 4, col = '#519cb3')
+
+hist(FAA$speed_ground, main = "Histogram of speed_ground", freq = FALSE, xlab = "speed_ground")
+lines(density(FAA$speed_ground), lwd = 4, col = '#519cb3')
+
+par(mfrow = c(2,2))
+
+hist(FAA$speed_air, main = "Histogram of speed_air", freq = FALSE, xlab = "speed_air")
+
+hist(FAA$height, main = "Histogram of height", freq = FALSE, xlab = "height")
+lines(density(FAA$height), lwd = 4, col = '#519cb3')
+
+hist(FAA$pitch, main = "Histogram of pitch", freq = FALSE, xlab = "pitch")
+lines(density(FAA$pitch), lwd = 4, col = '#519cb3')
+
+hist(FAA$distance, main = "Histogram of distance", freq = FALSE, xlab = "distance")
+lines(density(FAA$distance), lwd = 4, col = '#519cb3')
+```
+
+From the summary statistics, we see that there exist abnormal flights in this dataset. Therefore, the data needs to be cleaned before performing analysis.
+
+# Data cleaning and further exploration
+There are couple of “abnormal” values in the data set that needs to be cleaned or imputed.
+
+```{r}
+FAA <- FAA %>% 
+  filter(height >= 6) %>% 
+  filter(duration >= 40 | is.na(duration)) %>% 
+  filter(speed_air >= 30 | is.na(speed_air) | speed_air <= 140) %>% 
+  filter(speed_ground >= 30 | is.na(speed_ground) | speed_ground <= 140) 
+
+# imputing the speed air missing values with mean value
+
+FAA$speed_air[is.na(FAA$speed_air)] <- mean(FAA$speed_air, na.rm = TRUE)
+FAA$duration[is.na(FAA$duration)] <- mean(FAA$duration, na.rm = TRUE)
+```
+
+
+* 15 records have been removed from the dataset based on the abnormalities
+* After removal 835 rows of dataset is available
+* Imputed the missing values from speed air and Duration with mean value
+
+```{r}
+par(mfrow = c(2,2))
+
+barplot(table(FAA$aircraft), main = "Aircraft distribution", xlab = "Aircraft", col = "#519cb3")
+
+hist(FAA$duration, main = "Histogram of duration", freq = FALSE, xlab = "duration")
+lines(density(FAA$duration), lwd = 5, col = '#519cb3')
+
+hist(FAA$no_pasg, main = "Histogram of no_pasg", freq = FALSE, xlab = "no_pasg")
+lines(density(FAA$no_pasg), lwd = 5, col = '#519cb3')
+
+hist(FAA$speed_ground, main = "Histogram of speed_ground", freq = FALSE, xlab = "speed_ground")
+lines(density(FAA$speed_ground), lwd = 5, col = '#519cb3')
+
+par(mfrow = c(2,2))
+
+hist(FAA$speed_air, main = "Histogram of speed_air", freq = FALSE, xlab = "speed_air")
+lines(density(FAA$speed_air), lwd = 5, col = '#519cb3')
+
+hist(FAA$height, main = "Histogram of height", freq = FALSE, xlab = "height")
+lines(density(FAA$height), lwd = 5, col = '#519cb3')
+
+hist(FAA$pitch, main = "Histogram of pitch", freq = FALSE, xlab = "pitch")
+lines(density(FAA$pitch), lwd = 5, col = '#519cb3')
+
+hist(FAA$distance, main = "Histogram of distance", freq = FALSE, xlab = "distance")
+lines(density(FAA$distance), lwd = 4, col = '#519cb3')
+```
+
+Observations: 
+
+* Roughly equal proportion of data is available for both aircraft makers
+* Imputed the speed air and duration
+* Duration, no_pasg, speed_ground, height, pitch looks symmetrical
+* speed_air values are right skewed
+* distance values are right skewed
+
+
+# Initial analysis to identify factors impacting the response variable - distance
+
+#### Pairwise correlation between the distance and each predictor:
+```{r}
+FAA <- transform(FAA, aircraft = ifelse(FAA$aircraft == "boeing", 1, 0))
+cor(FAA$distance, FAA[,c(1:7)], use = "pairwise.complete.obs")
+```
+```{r}
+variable <- c("speed_ground",  "speed_air", "aircraft", "height", "pitch", "duration", "no_pasg")
+correlation <- c(0.861,0.452,0.241,0.100,0.099,0.051,0.018)
+direction <- c("Positive", "Positive", "Positive", "Positive", "Positive", "Negative", "Negative")
+
+table1 <- data.frame(variable,correlation,direction)
+colnames(table1) <- c("Variable","size of the correlation","direction of the correlation")
+
+kable(table1, row.names = F, align = "c",  caption = "Table 1")
+```
+#### Scatter plots between the response variable and each predictor:
+```{r}
+par(mfrow = c(2,2))
+plot(x = FAA$aircraft, y = FAA$distance, main = "Distance by Aircraft", xlab = "Aircraft", ylab = "distance", col = '#519cb3')
+plot(x = FAA$duration, y = FAA$distance, main = "Distance by Duration", xlab = "duration", ylab = "distance", col = '#519cb3')
+plot(x = FAA$no_pasg, y = FAA$distance, main = "Distance by Passangers", xlab = "no_pasg", ylab = "distance", col = '#519cb3')
+plot(x = FAA$speed_ground, y = FAA$distance, main = "Distance by Ground Speed", xlab = "speed_ground", ylab = "distance", col = '#519cb3')
+par(mfrow = c(2,2))
+plot(x = FAA$speed_air, y = FAA$distance, main = "Distance by Air Speed", xlab = "speed_air", ylab = "distance", col = '#519cb3')
+plot(x = FAA$height, y = FAA$distance, main = "Distance by Height", xlab = "height", ylab = "distance", col = '#519cb3')
+plot(x = FAA$pitch, y = FAA$distance, main = "Distance by Pitch", xlab = "pitch", ylab = "distance", col = '#519cb3')
+```
+
+We can clearly observe from the table and the plots that the 'speed_air' and 'speed_ground' has strong correlation. 
+
+# Regression using a single factor each time
+
+```{r}
+# Individual linear regression models
+lm1 <- lm(distance ~ aircraft, data = FAA)
+lm2 <- lm(distance ~ duration, data = FAA)
+lm3 <- lm(distance ~ no_pasg, data = FAA)
+lm4 <- lm(distance ~ speed_ground, data = FAA)
+lm5 <- lm(distance ~ speed_air, data = FAA)
+lm6 <- lm(distance ~ height, data = FAA)
+lm7 <- lm(distance ~ pitch, data = FAA)
+
+# Create the table 
+Variable <- colnames(FAA)[1:7]
+
+p_Value <- c(round(as.numeric(anova(lm1)$'Pr(>F)'[1]),2),
+       round(as.numeric(anova(lm2)$'Pr(>F)'[1]),2),
+       round(as.numeric(anova(lm3)$'Pr(>F)'[1]),2),
+       round(as.numeric(anova(lm4)$'Pr(>F)'[1]),2),
+       round(as.numeric(anova(lm5)$'Pr(>F)'[1]),2),
+       round(as.numeric(anova(lm6)$'Pr(>F)'[1]),2),
+       round(as.numeric(anova(lm7)$'Pr(>F)'[1]),2))
+
+
+table2 <- data.frame(Variable, p_Value)
+
+colnames(table2) <- c("Variable", "p_Value")
+
+# Print the table
+kable(table2[order(table2$p_Value, decreasing = FALSE),], row.names = F, align = "c",  caption = "Table 2")
+```
+
+```{r}
+# create new dataset after standard normalization
+FAA_std <- FAA
+attach(FAA_std)
+FAA_std <- transform(FAA_std, aircraft = (aircraft - mean(aircraft))/sd(aircraft))
+FAA_std <- transform(FAA_std, duration = (duration - mean(duration,na.rm = TRUE))/sd(duration,na.rm = TRUE))
+FAA_std <- transform(FAA_std, no_pasg = (no_pasg - mean(no_pasg))/sd(no_pasg))
+FAA_std <- transform(FAA_std, speed_ground = (speed_ground - mean(speed_ground))/sd(speed_ground))
+FAA_std <- transform(FAA_std, speed_air = (speed_air - mean(speed_air,na.rm = TRUE))/sd(speed_air,na.rm = TRUE))
+FAA_std <- transform(FAA_std, height = (height - mean(height))/sd(height))
+FAA_std <- transform(FAA_std, pitch = (pitch - mean(pitch))/sd(pitch))
+
+
+# Individual linear regression models
+lm1 <- lm(distance ~ aircraft, data = FAA_std)
+lm2 <- lm(distance ~ duration, data = FAA_std)
+lm3 <- lm(distance ~ no_pasg, data = FAA_std)
+lm4 <- lm(distance ~ speed_ground, data = FAA_std)
+lm5 <- lm(distance ~ speed_air, data = FAA_std)
+lm6 <- lm(distance ~ height, data = FAA_std)
+lm7 <- lm(distance ~ pitch, data = FAA_std)
+
+# Create the table 
+Variable <- colnames(FAA_std)[1:7]
+
+
+size_coefficient <- c(lm1$coefficients[2],
+       lm2$coefficients[2],
+       lm3$coefficients[2],
+       lm4$coefficients[2],
+       lm5$coefficients[2],
+       lm6$coefficients[2],
+       lm7$coefficients[2])
+
+dir_corr <- c('positive','negative','negative','positive','positive','positive','positive')
+table3 <- data.frame(Variable,size_coefficient,dir_corr)
+colnames(table3) <- c("Variable", "size_coefficient", "sign_coefficient")
+
+# Print the table
+kable(table3[order(table3$size_coefficient, decreasing = TRUE),], row.names = F, align = "c",  caption = "Table 3")
+```
+#### Comparing tables 1, 2 , 3
+
+```{r}
+inner1 <- full_join(table1, table2, by = 'Variable') 
+
+table <- full_join(inner1, table3, by = 'Variable')
+
+# Print the table
+kable(table, row.names = F, align = "c",  caption = "Final Table")
+```
+
+Based on the results:
+
+* When comparing the results across the 3 tables, most of the variables have relatively similar importance.
+* The direction of correlation is also similar but changing for pitch and no. of passengers.
+* Across all the computation speed_air and speed_ground has higher correlation.
+
+# Checking for multicollinearity
+
+Comparing the regression coefficients of the three models below: 
+
+* Model 1: distance ~ speed_ground 
+* Model 2: distance ~ speed_air 
+* Model 3: distance ~ speed_ground + speed_air
+```{r}
+model1 <- lm(distance ~ speed_ground, data = FAA)
+model2 <- lm(distance ~ speed_air, data = FAA)
+model3 <- lm(distance ~ speed_ground + speed_air, data = FAA)
+
+# Print the Coefficients of each model
+kable(model1$coefficients, caption = "Model 1", col.names = c("Coefficient"), digits = 1, format.args = list(big.mark = ','), align = "c")
+```
+```{r}
+kable(model2$coefficients, caption = "Model 2", col.names = c("Coefficient"), digits = 1, format.args = list(big.mark = ','), align = "c")
+```
+
+```{r}
+kable(model3$coefficients, caption = "Model 3", col.names = c("Coefficient"), digits = 1, format.args = list(big.mark = ','), align = "c")
+```
+
+While comparing the 3 model results, we see that coefficient of speed_ground is changing. Whereas variable speed_air is also changing but the change is relatively higher compared to speed_ground. So there might be a potential multicollinearity.
+```{r}
+cor(FAA$speed_ground, FAA$speed_air, use = "na.or.complete")
+```
+```{r}
+plot(x = FAA$speed_ground, y = FAA$speed_air, main = "speed_ground by speed_air", xlab = "speed_ground", ylab = "speed_air", col = '#519cb3')
+```
+
+* Based on the correlation we can clearly notice that both speed_ground and speed_air are highly correlated. So, we need to use one of the variable in modelling point of view.
+* Since most of the data is missing for speed_air, In our opinion it’s better to drop speed_air and include speed_ground in the model
+* For better understanding the multicollinearity we can either explore VIF and other techniques
+
+# Variable selection based on Final Table
+```{r}
+# Running multiple models after dropping speed_air variable
+lm1 <- lm(distance ~ speed_ground, data = FAA)
+lm2 <- lm(distance ~ speed_ground + aircraft, data = FAA)
+lm3 <- lm(distance ~ speed_ground + aircraft + height, data = FAA)
+lm4 <- lm(distance ~ speed_ground + aircraft + height + pitch, data = FAA)
+lm5 <- lm(distance ~ speed_ground + aircraft + height + pitch + duration, data = FAA)
+lm6 <- lm(distance ~ speed_ground + aircraft + height + pitch + duration + no_pasg, data = FAA)
+
+
+# Calculate the R-Squared Values
+rsqd <- c(summary(lm1)$r.squared,
+           summary(lm2)$r.squared,
+           summary(lm3)$r.squared,
+           summary(lm4)$r.squared,
+           summary(lm5)$r.squared,
+           summary(lm6)$r.squared)
+
+count_variable <- c(1:6)
+
+output17 = data.frame(count_variable = count_variable, rsqd = rsqd)
+
+# Plot
+ggplot(data = output17, aes(x = count_variable, y = rsqd, group = 1)) +
+  geom_line(linetype = "dashed", color = "#519cb3") +
+  geom_point(color = "#519cb3") + 
+  ggtitle("R-Squared") +
+  labs(x = "Number of Input variables", y = "R-Squared")
+```
+```{r}
+kable(output17, digits = 2, align = "c")
+```
+
+Using adjusted R-squared
+```{r}
+# Calculate the Adjusted R-Squared Values
+adj.rsqd <- c(summary(lm1)$adj.r.squared,
+              summary(lm2)$adj.r.squared,
+              summary(lm3)$adj.r.squared,
+              summary(lm4)$adj.r.squared,
+              summary(lm5)$adj.r.squared,
+              summary(lm6)$adj.r.squared)
+
+output18 = data.frame(count_variable = count_variable, adj.rsqd = adj.rsqd)
+
+# Plot
+ggplot(data = output18, aes(x = count_variable, y = adj.rsqd, group = 1)) +
+  geom_line(linetype = "dashed", color = "#519cb3") +
+  geom_point(color = "#519cb3") + 
+  ggtitle("Adjusted R-Squared") +
+  labs(x = "Number of Input variables", y = "Adjusted R-Squared")
+
+
+```
+```{r}
+kable(output18, digits = 4, align = "c")
+```
+
+Using AIC:
+```{r}
+# Calculate the AIC Values
+aic.fig <- c(AIC(lm1),
+              AIC(lm2),
+              AIC(lm3),
+              AIC(lm4),
+              AIC(lm5),
+              AIC(lm6))
+
+
+output19 = data.frame(count_variable = count_variable, aic.fig = aic.fig)
+
+# Plot
+ggplot(data = output19, aes(x = count_variable, y = aic.fig, group = 1)) +
+  geom_line(linetype = "dashed", color = "#519cb3") +
+  geom_point(color = "#519cb3") + 
+  ggtitle("AIC") +
+  labs(x = "Number of Input variables", y = "AIC")
+```
+```{r}
+kable(output19, digits = 2, align = "c")
+```
+
+Comparing the three models: 
+
+* When comparing all the above models, we can clearly notice that model 3 has high R squared, Adj.R squared and low AIC so model 3 can be chosed among them and below are the summary statictics of the model.
+* Model contains speed_ground, aircraft, height as the input variables
+```{r}
+summary(lm3)
+```
